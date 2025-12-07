@@ -1,4 +1,4 @@
 catboost_info/
 .idea/
 .DS_Store
-.venv
+.venv/
