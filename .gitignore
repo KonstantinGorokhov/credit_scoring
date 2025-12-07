@@ -2,3 +2,4 @@ catboost_info/
 .idea/
 .DS_Store
 .venv/
+.__pycache__/
