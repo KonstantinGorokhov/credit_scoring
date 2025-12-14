@@ -3,3 +3,9 @@ catboost_info/
 .DS_Store
 .venv/
 .__pycache__/
+__pycache__
+credit_scoring.egg-info
+.python-version
+main.py
+pyproject.toml
+uv.lock
