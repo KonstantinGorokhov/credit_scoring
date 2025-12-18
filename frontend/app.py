@@ -1,3 +1,8 @@
+"""Streamlit-приложение для демонстрации работы модели кредитного скоринга.
+
+Предоставляет пользовательский интерфейс для ввода данных клиента и получения
+результата скоринга (одобрен/не одобрен кредит).
+"""
 import streamlit as st
 import asyncio
 
@@ -7,20 +12,25 @@ from api_client import score_client
 
 st.set_page_config(page_title="Кредитный скоринг", layout="centered")
 
+# --- Заголовок и описание ---
 st.title("Кредитный скоринг")
 st.write("Введите данные клиента")
 
-# ======================
-# Режим работы
-# ======================
+# ================================
+#    Режим работы
+# ================================
 mode = st.radio(
     "Режим задания параметров скоринга",
     ["Автоматическая генерация", "Ручной ввод"],
-    horizontal=True
+    horizontal=True,
+    help="Выберите, как будут заданы неочевидные для клиента параметры: "
+         "случайным образом или вручную."
 )
 
+# --- Форма для ввода данных ---
 with st.form("credit_form"):
 
+    # --- Основные данные клиента ---
     education_ru = st.selectbox("Уровень образования", list(EDUCATION_MAP.keys()))
     age = st.number_input("Возраст", 18, 90, 30)
 
@@ -33,10 +43,11 @@ with st.form("credit_form"):
 
     st.divider()
 
-    # ======================
-    # Ручной ввод параметров
-    # ======================
+    # ================================
+    #    Ручной ввод скрытых параметров
+    # ================================
     if mode == "Ручной ввод":
+        st.subheader("Скрытые параметры")
         appl_rej_cnt = st.slider("Количество отклоненных заявок в прошлом", 0, 5, 1)
         Score_bki = st.slider("Скоринговый балл по данным из БКИ", -3.0, 3.0, -1.5, step=0.1)
         out_request_cnt = st.slider("Количество запросов в БКИ", 0, 5, 1)
@@ -48,11 +59,11 @@ with st.form("credit_form"):
 
     submitted = st.form_submit_button("Рассчитать")
 
-# ======================
-# Обработка
-# ======================
+# ================================
+#    Обработка и вызов API
+# ================================
 if submitted:
-
+    # --- Определение скрытых признаков ---
     if mode == "Автоматическая генерация":
         hidden = generate_hidden_features()
     else:
@@ -66,7 +77,8 @@ if submitted:
             "SNA": SNA,
             "first_time_cd": first_time_cd
         }
-
+    
+    # --- Формирование payload для API ---
     payload = {
         "education_cd": EDUCATION_MAP[education_ru],
         "age": age,
@@ -77,18 +89,19 @@ if submitted:
         "Air_flg": YES_NO_MAP[air_ru],
         **hidden
     }
-
+    
+    # --- Отправка запроса и отображение результата ---
     with st.spinner("Выполняется скоринг..."):
         try:
             result = asyncio.run(score_client(payload))
         except Exception as e:
-            st.error("Ошибка при обращении к сервису")
+            st.error("Ошибка при обращении к сервису.")
             st.exception(e)
         else:
             if result["approved"]:
-                st.success("Кредит одобрен")
+                st.success("Кредит одобрен.")
             else:
-                st.error("Кредит не одобрен")
+                st.error("Кредит не одобрен.")
 
             st.divider()
             st.subheader("Использованные параметры скоринга")

@@ -1,3 +1,11 @@
+"""Скрипт для создания и сохранения производственного пайплайна.
+
+Этот скрипт выполняет следующие шаги:
+1.  Загрузка и объединение данных.
+2.  Предварительная обработка данных.
+3.  Определение числовых и категориальных признаков.
+4.  Создание, обучение и сохранение финального пайплайна.
+"""
 import pandas as pd
 import numpy as np
 import os
@@ -14,7 +22,9 @@ from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
 
 
-# -- КОНФИГУРАЦИЯ И ЗАГРУЗКА ДАННЫХ --
+# ===================================
+#      КОНФИГУРАЦИЯ И ЗАГРУЗКА ДАННЫХ
+# ===================================
 
 DATA_DIR = '/Users/masha/src/creditscoring-personal/Submodules/credit_scoring/fintech-credit-scoring'
 APPLICATION_INFO_FILE = os.path.join(DATA_DIR, 'application_info.csv')
@@ -30,13 +40,17 @@ except FileNotFoundError as e:
 
 df = pd.merge(application_df, default_flg_df, on='id')
 
-# -- УДАЛЕНИЕ НЕИНФОРМАТИВНЫХ ПРИЗНАКОВ И ОБРАБОТКА ПРОПУСКОВ --
+# ===================================
+#      ПРЕДВАРИТЕЛЬНАЯ ОБРАБОТКА ДАННЫХ
+# ===================================
 
 df = df.drop(['id', 'application_dt', 'sample_cd', 'gender_cd'], axis=1)
 df = df.dropna()
 
 
-# -- ОПРЕДЕЛЕНИЕ ПРИЗНАКОВ И ЦЕЛЕВОЙ ПЕРЕМЕННОЙ --
+# ===================================
+#      ОПРЕДЕЛЕНИЕ ПРИЗНАКОВ И ЦЕЛЕВОЙ ПЕРЕМЕННОЙ
+# ===================================
 
 numeric_features = [
     "age",
@@ -63,7 +77,9 @@ X = df.drop(columns=["default_flg"])
 y = df["default_flg"]
 
 
-# -- СОЗДАНИЕ И ОБУЧЕНИЕ ФИНАЛЬНОГО PIPELINE --
+# ===================================
+#      СОЗДАНИЕ И ОБУЧЕНИЕ ФИНАЛЬНОГО PIPELINE
+# ===================================
 
 numeric_transformer = Pipeline(steps=[
     ("imputer", SimpleImputer(strategy="median")),
@@ -105,7 +121,9 @@ X_train, X_test, y_train, y_test = train_test_split(
 pipeline.fit(X_train, y_train)
 
 
-# -- СОХРАНЕНИЕ ОБУЧЕННОГО PIPELINE --
+# ===================================
+#      СОХРАНЕНИЕ ОБУЧЕННОГО PIPELINE
+# ===================================
 
 joblib.dump(pipeline, MODEL_OUTPUT_PATH)
 

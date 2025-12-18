@@ -1,9 +1,18 @@
 import random
 
 
-def generate_hidden_features():
+def generate_hidden_features() -> dict:
+    """Генерирует случайные значения для скрытых признаков.
+
+    Эти признаки обычно недоступны для прямого ввода пользователем
+    и служат для симуляции более реалистичных данных для модели.
+
+    Returns:
+        Словарь со случайно сгенерированными признаками.
+    """
     appl_rej_cnt = random.randint(0, 5)
 
+    # Логика для генерации более реалистичного Score_bki
     if appl_rej_cnt <= 1:
         score_bki = round(random.uniform(-3.0, -1.0), 2)
     else:

@@ -1,3 +1,28 @@
+"""Скрипт для обучения и оценки моделей кредитного скоринга (Версия 2).
+
+Этот скрипт представляет собой улучшенную и более структурированную
+версию `Version-1/model.py`. Он выполняет полный цикл построения
+модели машинного обучения:
+1.  Загрузка и объединение данных.
+2.  Предварительная обработка: удаление неинформативных признаков и
+    пропущенных значений.
+3.  Разведочный анализ данных (EDA), включая корреляционный анализ.
+4.  Создание конвейера (pipeline) для предобработки числовых и
+    категориальных признаков.
+5.  Разделение данных на обучающую и тестовую выборки.
+6.  Балансировка классов с использованием техники SMOTE.
+7.  Визуализация данных до и после балансировки с помощью PCA.
+8.  Обучение и подбор гиперпараметров для различных моделей:
+    - Логистическая регрессия
+    - XGBoost
+    - CatBoost
+    - Случайный лес
+9.  Оценка качества моделей по метрике F1-score.
+10. Создание, обучение и сохранение финального продакшн-пайплайна,
+    включающего предобработку, SMOTE и логистическую регрессию с
+    оптимальными параметрами.
+"""
+
 # -- ОБЩИЕ ИМПОРТЫ: РАБОТА С ДАННЫМИ И ВИЗУАЛИЗАЦИЯ --
 
 import pandas as pd
@@ -8,38 +33,31 @@ import os
 
 
 # -- ИМПОРТЫ SKLEARN: ПРЕДОБРАБОТКА, МОДЕЛИ, МЕТРИКИ --
-
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import classification_report
 from sklearn.linear_model import LogisticRegression
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 
-
 # -- РАБОТА С ДИСБАЛАНСОМ КЛАССОВ --
-
-from imblearn import over_sampling
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
 
-
 # -- МОДЕЛИ ГРАДИЕНТНОГО БУСТИНГА --
-
 from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
 
-
 # -- СОХРАНЕНИЕ МОДЕЛЕЙ --
-
 import joblib
 
 
-# -- КОНФИГУРАЦИЯ И ЗАГРУЗКА ДАННЫХ --
+# ===================================
+#      КОНФИГУРАЦИЯ И ЗАГРУЗКА ДАННЫХ
+# ===================================
 
 # Определение путей к файлам и директориям
 DATA_DIR = '/Users/masha/src/creditscoring-personal/Submodules/credit_scoring/fintech-credit-scoring'
@@ -58,378 +76,200 @@ except FileNotFoundError as e:
 # Объединение двух наборов данных по идентификатору 'id'
 df = pd.merge(application_df, default_flg_df, on='id')
 
-df
 
-# -- УДАЛЕНИЕ НЕИНФОРМАТИВНЫХ ПРИЗНАКОВ --
+# ===================================
+#      ПРЕДВАРИТЕЛЬНАЯ ОБРАБОТКА
+# ===================================
 
 # Удаление идентификаторов и неинформативных признаков
 df = df.drop(['id', 'application_dt', 'sample_cd', 'gender_cd'], axis=1)
 
-df
-
-
-# -- АНАЛИЗ ПРОПУЩЕННЫХ ЗНАЧЕНИЙ --
-
-# Подсчёт количества пропусков по каждому признаку
-df.isnull().sum()
-
-# Удаление строк с пропущенными значениями
+# Анализ пропущенных значений и их удаление
+# print(df.isnull().sum())
 df = df.dropna()
-
-# Повторная проверка на пропуски
-df.isnull().sum()
+# print(df.isnull().sum())
 
 
-# -- КОРРЕЛЯЦИОННЫЙ АНАЛИЗ --
+# ===================================
+#      РАЗВЕДОЧНЫЙ АНАЛИЗ ДАННЫХ (EDA)
+# ===================================
 
+# Построение корреляционной матрицы для числовых признаков
 corr = df.select_dtypes(include=np.number).corr()
 plt.figure(figsize=(12, 10))
 sns.heatmap(corr, annot=True, cmap='coolwarm', fmt='.2f')
-plt.title("Correlation Matrix")
+plt.title("Корреляционная матрица")
 plt.show()
 
 
-# -- РАЗДЕЛЕНИЕ НА ПРИЗНАКИ И ЦЕЛЕВУЮ ПЕРЕМЕННУЮ --
+# ===================================
+#      ПОДГОТОВКА ДАННЫХ
+# ===================================
 
-# Матрица признаков
+# Разделение на признаки (X) и целевую переменную (y)
 X = df.drop(columns=['default_flg'], axis=1)
-
-# Целевая переменная
 y = df['default_flg']
 
-
-# -- ОПРЕДЕЛЕНИЕ ТИПОВ ПРИЗНАКОВ --
-
-# Числовые признаки
+# Определение числовых и категориальных признаков
 numeric_features = X.select_dtypes(include=['float64', 'int64']).columns
-
-numeric_features
-
-# Категориальные признаки
 categorical_features = X.select_dtypes(include=['object', 'category']).columns
 
-categorical_features
-
-# Количество уникальных значений в категориальных признаках
-X[categorical_features].nunique()
-
-
-# -- ПРЕДОБРАБОТКА ПРИЗНАКОВ --
-
-# Предобработка: числовые + категориальные признаки
-preprocessor = ColumnTransformer([
-    # Числовые признаки: медиана + стандартизация
-    ('num', Pipeline([
-        ('imputer', SimpleImputer(strategy='median')),
-        ('scaler', StandardScaler())
-    ]), numeric_features),
-
-    # Категориальные признаки: мода + One-Hot Encoding
-    ('cat', Pipeline([
-        ('imputer', SimpleImputer(strategy='most_frequent')),
-        ('encoder', OneHotEncoder(handle_unknown='ignore'))
-    ]), categorical_features)
-])
+# Создание конвейера для предобработки признаков
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', Pipeline(steps=[
+            ('imputer', SimpleImputer(strategy='median')),
+            ('scaler', StandardScaler())
+        ]), numeric_features),
+        ('cat', Pipeline(steps=[
+            ('imputer', SimpleImputer(strategy='most_frequent')),
+            ('encoder', OneHotEncoder(handle_unknown='ignore'))
+        ]), categorical_features)
+    ])
 
 
-# -- РАЗБИЕНИЕ НА ОБУЧАЮЩУЮ И ТЕСТОВУЮ ВЫБОРКИ --
+# ===================================
+#      РАЗДЕЛЕНИЕ И ПРЕОБРАЗОВАНИЕ ДАННЫХ
+# ===================================
 
 # Разделение данных с сохранением пропорций классов
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y
 )
 
-# Обучение предобработчика на train
+# Обучение препроцессора и преобразование обучающей выборки
 preprocessed_X_train = preprocessor.fit_transform(X_train)
-
-# Применение предобработки к test
+# Преобразование тестовой выборки
 preprocessed_X_test = preprocessor.transform(X_test)
 
-# Получение имён сгенерированных признаков
-features_names = preprocessor.get_feature_names_out()
 
+# ===================================
+#      БАЛАНСИРОВКА КЛАССОВ (SMOTE)
+# ===================================
 
-# -- АНАЛИЗ РАСПРЕДЕЛЕНИЯ ЦЕЛЕВОЙ ПЕРЕМЕННОЙ --
-
-# Визуализация распределения целевой переменной
-sns.countplot(x=y)
+# Визуализация распределения до балансировки
+sns.countplot(x=y_train)
+plt.title("Распределение классов до SMOTE")
 plt.show()
 
-
-# -- БАЛАНСИРОВКА КЛАССОВ (SMOTE) --
-
-# Инициализация SMOTE
-smote = over_sampling.SMOTE(random_state=42)
-
-# Oversampling обучающей выборки
+# Применение SMOTE
+smote = SMOTE(random_state=42)
 X_res, y_res = smote.fit_resample(preprocessed_X_train, y_train)
 
-
-# -- ВИЗУАЛИЗАЦИЯ ДАННЫХ С ПОМОЩЬЮ PCA --
-
-# PCA до SMOTE
-pca = PCA(n_components=2)
-X_pca = pca.fit_transform(preprocessed_X_train)
-
-sns.scatterplot(x=X_pca[:, 0], y=X_pca[:, 1], hue=y_train, palette='viridis')
-
-# PCA после SMOTE
-pca = PCA(n_components=2)
-X_pca = pca.fit_transform(X_res)
-
-sns.scatterplot(x=X_pca[:, 0], y=X_pca[:, 1], hue=y_res, palette='viridis')
-
-# Проверка баланса классов после SMOTE
+# Визуализация распределения после балансировки
 sns.countplot(x=y_res)
+plt.title("Распределение классов после SMOTE")
 plt.show()
 
 
-# -- ОБУЧЕНИЕ ЛОГИСТИЧЕСКОЙ РЕГРЕССИИ С ПОДБОРОМ ПАРАМЕТРОВ --
+# ===================================
+#      ВИЗУАЛИЗАЦИЯ С ПОМОЩЬЮ PCA
+# ===================================
 
-# Базовая модель логистической регрессии
-lr_model = LogisticRegression()
+# PCA до SMOTE
+pca_before = PCA(n_components=2)
+X_pca_before = pca_before.fit_transform(preprocessed_X_train)
+sns.scatterplot(x=X_pca_before[:, 0], y=X_pca_before[:, 1], hue=y_train, palette='viridis', alpha=0.7)
+plt.title("PCA до SMOTE")
+plt.show()
 
-# Пространство гиперпараметров
-lr_params = {
-    'C': np.logspace(-4, 2, 20)
-}
+# PCA после SMOTE
+pca_after = PCA(n_components=2)
+X_pca_after = pca_after.fit_transform(X_res)
+sns.scatterplot(x=X_pca_after[:, 0], y=X_pca_after[:, 1], hue=y_res, palette='viridis', alpha=0.7)
+plt.title("PCA после SMOTE")
+plt.show()
 
-# Поиск оптимальных параметров
-lr_search = RandomizedSearchCV(
-    lr_model,          # базовая модель
-    lr_params,         # пространство гиперпараметров
-    n_iter=10,         # количество случайных комбинаций
-    scoring='f1',      # целевая метрика (F1-score)
-    random_state=42,   # фиксируем генератор случайных чисел
-    cv=5,              # 5-кратная кросс-валидация
-    n_jobs=-1          # использование всех доступных ядер CPU
-)
 
-# Обучение модели
+# ===================================
+#      ОБУЧЕНИЕ И ОЦЕНКА МОДЕЛЕЙ
+# ===================================
+
+def evaluate_model(model, X_test_data, y_test_data, model_name=""):
+    """Оценивает модель и выводит отчет по классификации.
+
+    Args:
+        model: Обученная модель.
+        X_test_data: Тестовые данные (признаки).
+        y_test_data: Тестовые данные (целевая переменная).
+        model_name (str): Название модели для вывода.
+    """
+    y_pred = model.predict(X_test_data)
+    print(f"\n--- {model_name} Отчет по классификации ---")
+    print(classification_report(y_test_data, y_pred))
+
+# --- 1. Логистическая регрессия ---
+lr_model = LogisticRegression(random_state=42)
+lr_params = {'C': np.logspace(-4, 2, 20)}
+lr_search = RandomizedSearchCV(lr_model, lr_params, n_iter=10, scoring='f1', random_state=42, cv=5, n_jobs=-1)
 lr_search.fit(X_res, y_res)
+evaluate_model(lr_search.best_estimator_, preprocessed_X_test, y_test, "Логистическая регрессия")
+print(f"Лучшие параметры: {lr_search.best_params_}")
 
-
-# Функция оценки модели
-def evaluate_model(model):
-    y_pred = model.predict(preprocessed_X_test)
-    print(classification_report(y_test, y_pred))
-
-
-# Оценка лучшей модели
-evaluate_model(lr_search.best_estimator_)
-
-# Лучшие параметры
-lr_search.best_params_
-
-# -- ОБУЧЕНИЕ МОДЕЛИ XGBOOST --
-
-# Инициализация классификатора XGBoost с параметрами по умолчанию
-xgb_model = XGBClassifier()
-
-# Пространство поиска гиперпараметров для RandomizedSearchCV
-# Подбираются параметры сложности модели, регуляризации и скорости обучения
+# --- 2. XGBoost ---
+xgb_model = XGBClassifier(random_state=42)
 xgb_params = {
-    'max_depth': [7, 9, 10],                 # максимальная глубина деревьев
-    'gamma': [0.1, 0.15, 0.3],                # минимальное снижение функции потерь для разбиения
-    'alpha': [0.1, 0.15, 0.3],                # L1-регуляризация (разреживание)
-    'reg_lambda': [1.5, 2, 2.5],              # L2-регуляризация
-    'learning_rate': [0.02, 0.05, 0.1],       # шаг обучения (shrinkage)
-    'n_estimators': [200, 300, 400]           # количество деревьев
+    'max_depth': [7, 9, 10], 'gamma': [0.1, 0.15, 0.3], 'alpha': [0.1, 0.15, 0.3],
+    'reg_lambda': [1.5, 2, 2.5], 'learning_rate': [0.02, 0.05, 0.1], 'n_estimators': [200, 300, 400]
 }
-
-# Настройка случайного поиска гиперпараметров
-xgb_search = RandomizedSearchCV(
-    xgb_model,                                # базовая модель
-    xgb_params,                               # пространство параметров
-    n_iter=10,                                # количество случайных конфигураций
-    scoring='f1',                             # оптимизация по F1-мере
-    cv=4,                                     # кросс-валидация
-    n_jobs=-1,                                # использование всех ядер CPU
-    random_state=42                           # воспроизводимость результатов
-)
-
-# Обучение моделей XGBoost на сбалансированных данных (SMOTE)
+xgb_search = RandomizedSearchCV(xgb_model, xgb_params, n_iter=10, scoring='f1', cv=4, n_jobs=-1, random_state=42)
 xgb_search.fit(X_res, y_res)
+evaluate_model(xgb_search.best_estimator_, preprocessed_X_test, y_test, "XGBoost")
+print(f"Лучшие параметры: {xgb_search.best_params_}")
 
-# Оценка качества лучшей найденной модели на тестовой выборке
-evaluate_model(xgb_search.best_estimator_)
-
-
-# -- ОБУЧЕНИЕ МОДЕЛИ CATBOOST --
-
-# Инициализация CatBoost-классификатора
-# Параметр silent=True отключает логирование в stdout
-cat_model = CatBoostClassifier(silent=True)
-
-# Пространство поиска гиперпараметров CatBoost
-# Включает параметры сложности модели, регуляризации и стохастичности
+# --- 3. CatBoost ---
+cat_model = CatBoostClassifier(silent=True, random_state=42)
 cat_params = {
-    "iterations": [300, 500, 800, 1200, 1500],     # число деревьев
-    "learning_rate": [0.01, 0.02, 0.03, 0.05],     # скорость обучения
-    "depth": [4, 5, 6, 7, 8, 10],                  # глубина деревьев
-    "l2_leaf_reg": [1, 3, 5, 7, 9, 15, 20],        # L2-регуляризация листьев
-    "bagging_temperature": [0, 1, 5, 10],          # степень стохастичности бутстрэппинга
-    "random_strength": [0.5, 1, 2, 3, 5],          # уровень случайности при выборе разбиений
-    "border_count": [32, 64, 128, 254],             # количество бинов для числовых признаков
+    "iterations": [300, 500, 800], "learning_rate": [0.01, 0.03, 0.05],
+    "depth": [4, 6, 8], "l2_leaf_reg": [1, 3, 5, 9],
 }
-
-# Настройка RandomizedSearchCV для CatBoost
-cat_search = RandomizedSearchCV(
-    estimator=cat_model,                           # базовая модель
-    param_distributions=cat_params,                # пространство параметров
-    n_iter=5,                                      # число случайных конфигураций
-    scoring='f1',                                  # метрика оптимизации
-    cv=4,                                          # кросс-валидация
-    random_state=42,                               # воспроизводимость
-    n_jobs=-1,                                     # параллельное выполнение
-)
-
-# Обучение CatBoost на сбалансированных данных
+cat_search = RandomizedSearchCV(cat_model, cat_params, n_iter=5, scoring='f1', cv=4, random_state=42, n_jobs=-1)
 cat_search.fit(X_res, y_res)
+evaluate_model(cat_search.best_estimator_, preprocessed_X_test, y_test, "CatBoost")
+print(f"Лучшие параметры: {cat_search.best_params_}")
 
-# Оценка лучшей модели CatBoost на тестовой выборке
-evaluate_model(cat_search.best_estimator_)
-
-
-# -- ОБУЧЕНИЕ МОДЕЛИ RANDOM FOREST --
-
-# Инициализация случайного леса
+# --- 4. Случайный лес ---
 rf_model = RandomForestClassifier(random_state=42)
-
-# Пространство поиска гиперпараметров Random Forest
-# Учитывает контроль сложности модели и работу с дисбалансом классов
 rf_params = {
-    "n_estimators": [100, 200, 300, 500, 800],     # количество деревьев
-    "max_depth": [None, 5, 8, 10, 12, 15, 20],     # максимальная глубина деревьев
-    "min_samples_split": [2, 5, 10, 20, 50],       # минимальное число объектов для разбиения
-    "min_samples_leaf": [1, 2, 5, 10, 20],         # минимальное число объектов в листе
-    "max_features": ["sqrt", "log2", None],        # число признаков при разбиении
-    "bootstrap": [True, False],                    # использование бутстрэппинга
-    "class_weight": ["balanced", "balanced_subsample"]  # компенсация дисбаланса классов
+    "n_estimators": [100, 200, 500], "max_depth": [None, 10, 20], "min_samples_split": [2, 5, 10],
+    "min_samples_leaf": [1, 2, 4], "class_weight": ["balanced", "balanced_subsample"]
 }
-
-# Настройка случайного поиска гиперпараметров
-rf_search = RandomizedSearchCV(
-    estimator=rf_model,                            # базовая модель
-    param_distributions=rf_params,                 # пространство параметров
-    n_iter=5,                                      # число итераций поиска
-    scoring="f1",                                  # целевая метрика
-    cv=4,                                          # кросс-валидация
-    random_state=42,                               # воспроизводимость
-    n_jobs=-1,                                     # параллельные вычисления
-)
-
-# Обучение Random Forest на сбалансированных данных
+rf_search = RandomizedSearchCV(rf_model, rf_params, n_iter=5, scoring="f1", cv=4, random_state=42, n_jobs=-1)
 rf_search.fit(X_res, y_res)
-
-# Просмотр лучших гиперпараметров
-rf_search.best_params_
-
-# Оценка качества лучшей модели
-evaluate_model(rf_search.best_estimator_)
+evaluate_model(rf_search.best_estimator_, preprocessed_X_test, y_test, "Случайный лес")
+print(f"Лучшие параметры: {rf_search.best_params_}")
 
 
-# -- СОХРАНЕНИЕ PIPELINE --
+# ===================================
+#      СОЗДАНИЕ И СОХРАНЕНИЕ ФИНАЛЬНОГО PIPELINE
+# ===================================
 
-# Инициализация базовой логистической регрессии
-model = LogisticRegression(max_iter=1000)
-
-# Формирование pipeline: предобработка + модель
-pipeline = Pipeline([
-    ("preprocessor", preprocessor),                # этап предобработки признаков
-    ("model", model),                              # классификатор
-])
-
-# Обучение pipeline на исходных обучающих данных
-pipeline.fit(X_train, y_train)
-
-# Сохранение обученного pipeline на диск
-joblib.dump(pipeline, "pipeline.pkl")
-
-
-# -- ФИНАЛЬНЫЙ ПРОДАКШН PIPELINE С SMOTE --
-
-# Явное задание числовых признаков
-numeric_features = [
-    "age", 
-    "appl_rej_cnt", 
-    "Score_bki", 
-    "out_request_cnt",
-    "region_rating", 
-    "income", 
-    "SNA", 
-    "first_time_cd",
-]
-
-# Явное задание категориальных признаков
-categorical_features = [
-    "education_cd", 
-    "car_own_flg", 
-    "car_type_flg",
-    "good_work_flg", 
-    "home_address_cd", 
-    "work_address_cd", 
-    "Air_flg",
-]
-
-# Пайплайн предобработки числовых признаков
-numeric_transformer = Pipeline(steps=[
-    ("imputer", SimpleImputer(strategy="median")),
-    ("scaler", StandardScaler()), 
-])
-
-# Пайплайн предобработки категориальных признаков
-categorical_transformer = Pipeline(steps=[
-    ("imputer", SimpleImputer(strategy="most_frequent")), 
-    ("encoder", OneHotEncoder(handle_unknown="ignore")), 
-])
-
-# Объединение пайплайнов предобработки
-preprocessor = ColumnTransformer(
-    transformers=[
-        ("num", numeric_transformer, numeric_features),
-        ("cat", categorical_transformer, categorical_features), 
-    ]
+# Инициализация логистической регрессии с оптимальными параметрами,
+# найденными с помощью RandomizedSearchCV.
+final_model = LogisticRegression(
+    C=lr_search.best_params_['C'],
+    max_iter=1000,
+    random_state=42
 )
 
-# Инициализация логистической регрессии с оптимальными параметрами
-log_reg = LogisticRegression(
-    C=0.03359818286283781,          # коэффициент регуляризации
-    tol=0.0001,                     # критерий сходимости
-    max_iter=100,                   # максимальное число итераций
-    solver="lbfgs"                  # оптимизатор
-)
-
-# Финальный pipeline: предобработка + SMOTE + модель
-pipeline = ImbPipeline(steps=[
-    ("preprocessor", preprocessor), # предобработка признаков
-    ("smote", SMOTE(random_state=42)),  # балансировка классов
-    ("model", log_reg)               # классификатор
+# Создание финального pipeline, который включает предобработку,
+# балансировку SMOTE и модель.
+final_pipeline = ImbPipeline(steps=[
+    ('preprocessor', preprocessor),
+    ('smote', SMOTE(random_state=42)),
+    ('model', final_model)
 ])
 
-# Формирование матрицы признаков и целевой переменной
-X = df.drop(columns=["default_flg"])
-y = df["default_flg"]
+# Обучение финального pipeline на всем обучающем наборе данных.
+final_pipeline.fit(X_train, y_train)
 
-# Разбиение данных на обучающую и тестовую выборки
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
-)
+# Оценка финального pipeline на тестовых данных.
+evaluate_model(final_pipeline, X_test, y_test, "Финальный Pipeline (Logistic Regression + SMOTE)")
 
-# Обучение финального pipeline
-pipeline.fit(X_train, y_train)
+# Сохранение обученного pipeline на диск.
+joblib.dump(final_pipeline, MODEL_OUTPUT_PATH)
+print(f"\nФинальный pipeline сохранен по пути: {MODEL_OUTPUT_PATH}")
 
-# Получение предсказаний на тестовой выборке
-y_pred = pipeline.predict(X_test)
-
-# Вывод отчёта по качеству классификации
-print("\n=== Classification Report ===\n")
-print(classification_report(y_test, y_pred))
-
-# Сохранение финального pipeline
-joblib.dump(pipeline, "credit_scoring_pipeline.pkl")
-joblib.dump(pipeline, MODEL_OUTPUT_PATH)
-
-# Вывод списка используемых признаков
-print("NUMERIC:", numeric_features)
-print("CATEGORICAL:", categorical_features)
+# Вывод используемых признаков для информации
+print("\nИспользуемые числовые признаки:", list(numeric_features))
+print("Используемые категориальные признаки:", list(categorical_features))
